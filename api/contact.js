@@ -1,8 +1,35 @@
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const SITE_URL = "https://www.jsaexpertise.com";
+
 const trim = (v) => (typeof v === "string" ? v.trim() : "");
+const court = (v, max = 300) => trim(v).slice(0, max);
 const escapeHtml = (s) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+// Lien cliquable vers une page du site (chemin commençant par "/"), sinon texte brut.
+const lienPage = (chemin, libelle) => {
+  if (!chemin) return "";
+  const texte = escapeHtml(libelle || chemin);
+  return /^\/[^\s]*$/.test(chemin)
+    ? `<a href="${escapeHtml(SITE_URL + chemin)}">${texte}</a>`
+    : texte;
+};
+
+// Bloc « Origine de la demande » (champs envoyés par le site, tous facultatifs).
+function blocOrigine(o) {
+  const lignes = [];
+  if (o.formulaire) lignes.push(`<p><strong>Formulaire :</strong> ${escapeHtml(o.formulaire)}</p>`);
+  if (o.page) {
+    const titre = o.titrePage ? ` (${escapeHtml(o.titrePage)})` : "";
+    lignes.push(`<p><strong>Page :</strong> ${lienPage(o.page)}${titre}</p>`);
+  }
+  if (o.arrivee) lignes.push(`<p><strong>Page d'arrivée sur le site :</strong> ${lienPage(o.arrivee)}</p>`);
+  if (o.provenance) lignes.push(`<p><strong>Venu de :</strong> ${escapeHtml(o.provenance)}</p>`);
+  if (o.campagne) lignes.push(`<p><strong>Campagne :</strong> ${escapeHtml(o.campagne)}</p>`);
+  if (!lignes.length) return "";
+  return `<hr/><h3>Origine de la demande</h3>${lignes.join("\n        ")}`;
+}
 
 async function sendEmail(payload) {
   const resp = await fetch("https://api.resend.com/emails", {
@@ -41,6 +68,14 @@ export default async function handler(req, res) {
   const telephone = trim(body.telephone);
   const statut = trim(body.statut);
   const message = trim(body.message);
+  const origine = {
+    formulaire: court(body.formulaire, 120),
+    page: court(body.page),
+    titrePage: court(body.titrePage, 200),
+    arrivee: court(body.arrivee),
+    provenance: court(body.provenance, 120),
+    campagne: court(body.campagne, 200),
+  };
 
   const missing = [];
   if (!nom) missing.push("nom");
@@ -65,13 +100,14 @@ export default async function handler(req, res) {
       from: "JSA Expertise <onboarding@resend.dev>",
       to: ["joel.sayag@jsaexpertise.com"],
       reply_to: email,
-      subject: `Nouvelle demande de contact — ${nom}`,
+      subject: `Nouvelle demande de contact : ${nom}${origine.page ? ` (page ${origine.page})` : ""}`,
       html: `<h2>Nouveau message reçu</h2>
         <p><strong>Nom :</strong> ${escapeHtml(nom)}</p>
         <p><strong>Email :</strong> ${escapeHtml(email)}</p>
         <p><strong>Téléphone :</strong> ${escapeHtml(telephone) || "Non renseigné"}</p>
         <p><strong>Statut :</strong> ${escapeHtml(statut) || "Non renseigné"}</p>
-        <p><strong>Message :</strong><br/>${escapeHtml(message).replace(/\n/g, "<br/>")}</p>`,
+        <p><strong>Message :</strong><br/>${escapeHtml(message).replace(/\n/g, "<br/>")}</p>
+        ${blocOrigine(origine)}`,
     });
   } catch (err) {
     console.error("[contact] notification fetch threw", err);
